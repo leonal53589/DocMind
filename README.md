@@ -2,8 +2,6 @@
 
 一个本地知识存储系统，用于管理和组织文件、笔记和网页内容，支持自动分类功能。
 
-A local knowledge repository system for managing and organizing files, notes, and web content with automatic classification.
-
 ## 功能特性 / Features
 
 - **多格式支持**: 导入文档（PDF、DOCX、TXT）、图片、视频、代码文件和网页
@@ -15,14 +13,6 @@ A local knowledge repository system for managing and organizing files, notes, an
 - **多接口**: Web界面、命令行和REST API
 
 ---
-
-- **Multi-format Support**: Import documents (PDF, DOCX, TXT), images, videos, code files, and web pages
-- **Automatic Classification**: Rule-based and optional AI-powered content categorization
-- **Full-text Search**: Fast search across all your content using SQLite FTS5
-- **File Deduplication**: Automatically detects and handles duplicate files
-- **Text Extraction**: Extract and index text from PDFs, Word documents, and more
-- **Thumbnail Generation**: Automatic image thumbnails for visual browsing
-- **Multiple Interfaces**: Web UI, CLI, and REST API
 
 ## 快速开始 / Quick Start
 
