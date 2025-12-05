@@ -28,6 +28,17 @@ class ItemUpdate(BaseModel):
     category_id: Optional[int] = None
     extracted_text: Optional[str] = None
     item_metadata: Optional[dict[str, Any]] = None
+    is_favorite: Optional[bool] = None
+
+
+class AssociatedItemBrief(BaseModel):
+    """Brief info for associated items."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    content_type: str
+    thumbnail_path: Optional[str] = None
 
 
 class ItemResponse(ItemBase):
@@ -46,12 +57,15 @@ class ItemResponse(ItemBase):
     thumbnail_path: Optional[str] = None
     confidence: Optional[float] = None
     item_metadata: Optional[dict[str, Any]] = None
+    is_favorite: bool = False
+    favorite_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
     # Nested
     category_name: Optional[str] = None
     tags: list[str] = []
+    associated_items: list[AssociatedItemBrief] = []
 
 
 class ItemListResponse(BaseModel):
@@ -78,3 +92,8 @@ class ItemImportResponse(BaseModel):
     items_skipped: int
     errors: list[str] = []
     items: list[ItemResponse] = []
+
+
+class ItemAssociationRequest(BaseModel):
+    """Schema for adding/removing item associations."""
+    associated_item_id: int

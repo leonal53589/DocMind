@@ -29,15 +29,37 @@
       <div class="flex-1 min-w-0">
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0 flex-1">
-            <!-- Title - Clickable -->
-            <a
-              :href="getItemLink()"
-              :target="item.content_type === 'note' ? '_self' : '_blank'"
-              class="text-sm font-medium text-gray-900 hover:text-blue-600 truncate block cursor-pointer"
-              @click="handleItemClick($event)"
-            >
-              {{ item.title }}
-            </a>
+            <!-- Title - Clickable or Editable -->
+            <div class="flex items-center gap-2">
+              <a
+                v-if="!isEditingTitle"
+                :href="getItemLink()"
+                :target="item.content_type === 'note' ? '_self' : '_blank'"
+                class="text-sm font-medium text-gray-900 hover:text-blue-600 truncate block cursor-pointer"
+                @click="handleItemClick($event)"
+              >
+                {{ item.title }}
+              </a>
+              <input
+                v-else
+                v-model="editTitle"
+                @blur="saveTitle"
+                @keyup.enter="saveTitle"
+                @keyup.escape="cancelEditTitle"
+                class="text-sm font-medium text-gray-900 border border-blue-500 rounded px-2 py-1 w-full"
+                ref="titleInput"
+              />
+              <!-- Favorite Star -->
+              <button
+                @click.stop="handleToggleFavorite"
+                :disabled="favoriteLoading"
+                class="flex-shrink-0"
+                :title="item.is_favorite ? '取消收藏' : '添加到收藏'"
+              >
+                <StarIconSolid v-if="item.is_favorite" class="w-5 h-5 text-yellow-500" />
+                <StarIconOutline v-else class="w-5 h-5 text-gray-300 hover:text-yellow-500" />
+              </button>
+            </div>
             <p v-if="item.description" class="mt-1 text-sm text-gray-500 line-clamp-2">
               {{ item.description }}
             </p>
@@ -72,6 +94,13 @@
                 v-if="showMenu"
                 class="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10"
               >
+                <button
+                  @click="startEditTitle"
+                  class="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  <PencilIcon class="w-4 h-4" />
+                  重命名
+                </button>
                 <a
                   v-if="item.content_type === 'file' && item.file_path"
                   :href="`/files/${item.file_path}`"
@@ -98,11 +127,23 @@
                   修改分类
                 </button>
                 <button
-                  @click="handleReclassify"
+                  @click="openAssociationEditor"
                   class="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                 >
-                  <ArrowPathIcon class="w-4 h-4" />
-                  自动重新分类
+                  <LinkIcon class="w-4 h-4" />
+                  管理关联
+                </button>
+                <button
+                  @click="handleReclassify"
+                  :disabled="reclassifyLoading"
+                  class="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                >
+                  <svg v-if="reclassifyLoading" class="w-4 h-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <ArrowPathIcon v-else class="w-4 h-4" />
+                  {{ reclassifyLoading ? '分类中...' : '自动重新分类' }}
                 </button>
                 <button
                   @click="handleDelete"
@@ -179,12 +220,37 @@
         <!-- Tags -->
         <div v-if="item.tags && item.tags.length > 0" class="mt-2 flex flex-wrap gap-1">
           <span
-            v-for="tag in item.tags"
-            :key="tag.id"
+            v-for="(tag, index) in item.tags"
+            :key="index"
             class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700"
           >
-            {{ tag.name }}
+            {{ tag }}
           </span>
+        </div>
+
+        <!-- Associated Items -->
+        <div v-if="item.associated_items && item.associated_items.length > 0" class="mt-3">
+          <div class="flex items-center gap-2 text-xs text-gray-500 mb-2">
+            <LinkIcon class="w-3 h-3" />
+            <span>关联项目：</span>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <div
+              v-for="assoc in item.associated_items"
+              :key="assoc.id"
+              class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-50 text-blue-700 text-xs"
+            >
+              <component :is="typeIcons[assoc.content_type]" class="w-3 h-3" />
+              <span class="max-w-32 truncate">{{ assoc.title }}</span>
+              <button
+                @click.stop="removeAssociation(assoc.id)"
+                class="text-blue-400 hover:text-blue-600"
+                title="移除关联"
+              >
+                <XMarkIcon class="w-3 h-3" />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -224,11 +290,169 @@
         </div>
       </div>
     </div>
+
+    <!-- Association Editor Modal -->
+    <div v-if="showAssociationEditor" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showAssociationEditor = false">
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+        <div class="p-6 border-b border-gray-200">
+          <h3 class="text-lg font-medium text-gray-900">管理关联项目</h3>
+        </div>
+
+        <div class="flex-1 overflow-auto p-6">
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Left: Current Associations & Add New -->
+            <div class="space-y-4">
+              <!-- Current Associations -->
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">当前关联</label>
+                <div v-if="item.associated_items && item.associated_items.length > 0" class="space-y-2 max-h-48 overflow-y-auto">
+                  <div
+                    v-for="assoc in item.associated_items"
+                    :key="assoc.id"
+                    class="flex items-center justify-between p-2 bg-gray-50 rounded"
+                  >
+                    <div class="flex items-center gap-2 min-w-0">
+                      <component :is="typeIcons[assoc.content_type]" class="w-4 h-4 text-gray-500 flex-shrink-0" />
+                      <span class="text-sm truncate">{{ assoc.title }}</span>
+                    </div>
+                    <button
+                      @click="removeAssociation(assoc.id)"
+                      class="text-red-500 hover:text-red-700 flex-shrink-0"
+                    >
+                      <XMarkIcon class="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <p v-else class="text-sm text-gray-500">暂无关联项目</p>
+              </div>
+
+              <!-- Add New Association -->
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">添加关联</label>
+                <div v-if="loadingItems" class="text-sm text-gray-500 py-2">
+                  <span class="inline-flex items-center gap-2">
+                    <svg class="w-4 h-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    加载项目列表...
+                  </span>
+                </div>
+                <div v-else class="flex gap-2">
+                  <select
+                    v-model="selectedAssociationId"
+                    class="flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                  >
+                    <option :value="null">选择项目...</option>
+                    <option
+                      v-for="availableItem in availableItemsForAssociation"
+                      :key="availableItem.id"
+                      :value="availableItem.id"
+                    >
+                      {{ availableItem.title }}
+                    </option>
+                  </select>
+                  <button
+                    @click="addAssociation"
+                    :disabled="!selectedAssociationId || addingAssociation"
+                    class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {{ addingAssociation ? '添加中...' : '添加' }}
+                  </button>
+                </div>
+                <p v-if="!loadingItems && availableItemsForAssociation.length === 0" class="text-xs text-gray-400 mt-1">
+                  没有更多可关联的项目
+                </p>
+              </div>
+            </div>
+
+            <!-- Right: Association Network Graph -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">关联网络图</label>
+              <div class="border border-gray-200 rounded-lg bg-gray-50 h-64 relative overflow-hidden">
+                <svg ref="networkSvg" class="w-full h-full" viewBox="0 0 400 256" preserveAspectRatio="xMidYMid meet">
+                  <!-- Center node (current item) -->
+                  <circle
+                    :cx="networkCenter.x"
+                    :cy="networkCenter.y"
+                    r="30"
+                    :fill="getNodeFillColor(item.content_type)"
+                  />
+                  <text
+                    :x="networkCenter.x"
+                    :y="networkCenter.y"
+                    text-anchor="middle"
+                    dominant-baseline="middle"
+                    fill="white"
+                    font-size="10"
+                    font-weight="500"
+                  >
+                    {{ item.title.substring(0, 6) }}{{ item.title.length > 6 ? '...' : '' }}
+                  </text>
+
+                  <!-- Associated items as connected nodes -->
+                  <g v-for="(assoc, index) in item.associated_items || []" :key="assoc.id">
+                    <!-- Connection line -->
+                    <line
+                      :x1="networkCenter.x"
+                      :y1="networkCenter.y"
+                      :x2="getNodePosition(index, item.associated_items?.length || 0).x"
+                      :y2="getNodePosition(index, item.associated_items?.length || 0).y"
+                      stroke="#CBD5E1"
+                      stroke-width="2"
+                    />
+                    <!-- Node -->
+                    <circle
+                      :cx="getNodePosition(index, item.associated_items?.length || 0).x"
+                      :cy="getNodePosition(index, item.associated_items?.length || 0).y"
+                      r="24"
+                      :fill="getNodeFillColor(assoc.content_type)"
+                      class="cursor-pointer hover:opacity-80 transition-opacity"
+                      @click="navigateToItem(assoc)"
+                    />
+                    <!-- Node label -->
+                    <text
+                      :x="getNodePosition(index, item.associated_items?.length || 0).x"
+                      :y="getNodePosition(index, item.associated_items?.length || 0).y"
+                      text-anchor="middle"
+                      dominant-baseline="middle"
+                      fill="white"
+                      font-size="9"
+                      class="pointer-events-none"
+                    >
+                      {{ assoc.title.substring(0, 4) }}{{ assoc.title.length > 4 ? '..' : '' }}
+                    </text>
+                  </g>
+                </svg>
+
+                <!-- Empty state -->
+                <div
+                  v-if="!item.associated_items || item.associated_items.length === 0"
+                  class="absolute inset-0 flex items-center justify-center text-gray-400 text-sm"
+                >
+                  暂无关联，添加关联后将显示网络图
+                </div>
+              </div>
+              <p class="text-xs text-gray-400 mt-2">点击节点可查看关联项目详情</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="p-6 border-t border-gray-200 flex justify-end">
+          <button
+            @click="showAssociationEditor = false"
+            class="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg"
+          >
+            关闭
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useMainStore } from '../stores/main'
 import * as api from '../api'
 import {
@@ -245,7 +469,9 @@ import {
   XMarkIcon,
   PencilIcon,
   ExclamationCircleIcon,
+  StarIcon as StarIconOutline,
 } from '@heroicons/vue/24/outline'
+import { StarIcon as StarIconSolid } from '@heroicons/vue/24/solid'
 
 const props = defineProps({
   item: {
@@ -256,6 +482,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  allItems: {
+    type: Array,
+    default: () => [],
+  },
 })
 
 const emit = defineEmits(['delete', 'reclassify', 'update'])
@@ -264,13 +494,60 @@ const store = useMainStore()
 
 const showMenu = ref(false)
 const showCategoryEditor = ref(false)
+const showAssociationEditor = ref(false)
 const selectedCategoryId = ref(props.item.category_id)
 const savingCategory = ref(false)
 const aiLoading = ref(false)
 const aiSummary = ref(null)
 const aiError = ref(null)
+const reclassifyLoading = ref(false)
+const favoriteLoading = ref(false)
+
+// Rename state
+const isEditingTitle = ref(false)
+const editTitle = ref('')
+const titleInput = ref(null)
+
+// Association state
+const selectedAssociationId = ref(null)
+const addingAssociation = ref(false)
+const availableItems = ref([])
+const loadingItems = ref(false)
 
 const categories = computed(() => store.categories)
+
+// Items available for association (excluding current item and already associated items)
+const availableItemsForAssociation = computed(() => {
+  const associatedIds = new Set(props.item.associated_items?.map(a => a.id) || [])
+  associatedIds.add(props.item.id)
+  // Use availableItems if loaded, otherwise fall back to store items
+  const itemList = availableItems.value.length > 0 ? availableItems.value : store.items
+  return itemList.filter(i => !associatedIds.has(i.id))
+})
+
+// Fetch all items when association editor opens
+async function openAssociationEditor() {
+  showMenu.value = false
+  showAssociationEditor.value = true
+
+  // If we already have items from the store, use those immediately
+  if (store.items.length > 0 && availableItems.value.length === 0) {
+    availableItems.value = [...store.items]
+  }
+
+  // Always fetch fresh items
+  loadingItems.value = true
+  try {
+    const data = await store.fetchItems({ page: 1, page_size: 1000 })
+    if (data?.items) {
+      availableItems.value = data.items
+    }
+  } catch (error) {
+    console.error('Failed to fetch items for association:', error)
+  } finally {
+    loadingItems.value = false
+  }
+}
 
 const typeIcons = {
   file: DocumentTextIcon,
@@ -290,6 +567,51 @@ const typeLabels = {
   note: '笔记',
 }
 
+// Network graph helpers
+const networkSvg = ref(null)
+const networkCenter = { x: 200, y: 128 } // Center of 400x256 viewBox
+
+function getNodePosition(index, total) {
+  if (total === 0) return { x: 0, y: 0 }
+  const angle = (2 * Math.PI * index / total) - Math.PI / 2 // Start from top
+  const radius = 90
+  return {
+    x: networkCenter.x + radius * Math.cos(angle),
+    y: networkCenter.y + radius * Math.sin(angle)
+  }
+}
+
+function getNodeColorClass(contentType) {
+  const colors = {
+    file: 'text-blue-500',
+    url: 'text-green-500',
+    note: 'text-purple-500',
+  }
+  return colors[contentType] || 'text-gray-500'
+}
+
+function getNodeFillColor(contentType) {
+  const colors = {
+    file: '#3B82F6',    // blue-500
+    url: '#22C55E',     // green-500
+    note: '#A855F7',    // purple-500
+  }
+  return colors[contentType] || '#6B7280' // gray-500
+}
+
+function navigateToItem(assoc) {
+  // Close modal and emit event to update/navigate
+  showAssociationEditor.value = false
+  if (assoc.content_type === 'file' && assoc.file_path) {
+    window.open(`/files/${assoc.file_path}`, '_blank')
+  } else if (assoc.content_type === 'url' && assoc.url) {
+    window.open(assoc.url, '_blank')
+  } else {
+    // For notes or items without direct links, just alert the title
+    alert(`关联项目: ${assoc.title}`)
+  }
+}
+
 function getItemLink() {
   if (props.item.content_type === 'file' && props.item.file_path) {
     return `/files/${props.item.file_path}`
@@ -306,6 +628,75 @@ function handleItemClick(event) {
     if (props.item.extracted_text) {
       alert(props.item.extracted_text.substring(0, 500) + (props.item.extracted_text.length > 500 ? '...' : ''))
     }
+  }
+}
+
+// Rename functions
+function startEditTitle() {
+  showMenu.value = false
+  editTitle.value = props.item.title
+  isEditingTitle.value = true
+  nextTick(() => {
+    titleInput.value?.focus()
+    titleInput.value?.select()
+  })
+}
+
+async function saveTitle() {
+  if (!editTitle.value.trim() || editTitle.value === props.item.title) {
+    cancelEditTitle()
+    return
+  }
+
+  try {
+    await api.updateItem(props.item.id, { title: editTitle.value.trim() })
+    emit('update', props.item.id)
+  } catch (error) {
+    alert('重命名失败')
+  }
+  isEditingTitle.value = false
+}
+
+function cancelEditTitle() {
+  isEditingTitle.value = false
+  editTitle.value = ''
+}
+
+// Favorite functions
+async function handleToggleFavorite() {
+  favoriteLoading.value = true
+  try {
+    await api.toggleFavorite(props.item.id)
+    emit('update', props.item.id)
+  } catch (error) {
+    alert('操作失败')
+  } finally {
+    favoriteLoading.value = false
+  }
+}
+
+// Association functions
+async function addAssociation() {
+  if (!selectedAssociationId.value) return
+
+  addingAssociation.value = true
+  try {
+    await api.addAssociation(props.item.id, selectedAssociationId.value)
+    selectedAssociationId.value = null
+    emit('update', props.item.id)
+  } catch (error) {
+    alert(error.response?.data?.detail || '添加关联失败')
+  } finally {
+    addingAssociation.value = false
+  }
+}
+
+async function removeAssociation(associatedItemId) {
+  try {
+    await api.removeAssociation(props.item.id, associatedItemId)
+    emit('update', props.item.id)
+  } catch (error) {
+    alert('移除关联失败')
   }
 }
 
@@ -382,9 +773,19 @@ function handleDelete() {
   emit('delete', props.item.id)
 }
 
-function handleReclassify() {
+async function handleReclassify() {
   showMenu.value = false
-  emit('reclassify', props.item.id)
+  reclassifyLoading.value = true
+  aiError.value = null
+
+  try {
+    await api.reclassifyItem(props.item.id)
+    emit('update', props.item.id)
+  } catch (error) {
+    aiError.value = error.response?.data?.detail || 'AI分类失败，请稍后重试'
+  } finally {
+    reclassifyLoading.value = false
+  }
 }
 
 onMounted(async () => {

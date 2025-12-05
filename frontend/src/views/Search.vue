@@ -72,6 +72,7 @@
           :key="item.id"
           :item="item"
           :highlight="lastQuery"
+          :all-items="allItems"
           @delete="handleDelete"
           @update="handleUpdate"
         />
@@ -128,6 +129,7 @@ const lastQuery = ref('')
 const loading = ref(false)
 const hasSearched = ref(false)
 const items = ref([])
+const allItems = ref([])
 const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
@@ -192,6 +194,14 @@ function goToPage(page) {
 
 onMounted(async () => {
   await store.fetchCategories()
+
+  // Fetch all items for association feature
+  try {
+    const allData = await api.getItems({ page: 1, page_size: 1000 })
+    allItems.value = allData.data?.items || []
+  } catch (error) {
+    console.error('Failed to fetch all items:', error)
+  }
 
   // Check for query param
   if (route.query.q) {

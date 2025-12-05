@@ -9,13 +9,25 @@ from sqlalchemy.orm import selectinload
 
 from ..database import get_db
 from ..models import Item, Category
-from ..schemas.item import ItemResponse, ItemListResponse
+from ..schemas.item import ItemResponse, ItemListResponse, AssociatedItemBrief
 
 router = APIRouter()
 
 
 def _item_to_response(item: Item) -> ItemResponse:
     """Convert Item model to response schema."""
+    # Get associated items (both directions)
+    associated = []
+    if hasattr(item, 'associated_items') and item.associated_items:
+        for assoc in item.associated_items:
+            associated.append(AssociatedItemBrief(
+                id=assoc.id,
+                title=assoc.title,
+                content_type=assoc.content_type,
+                thumbnail_path=assoc.thumbnail_path,
+            ))
+    # Note: associated_by requires separate loading which we skip for simplicity
+
     return ItemResponse(
         id=item.id,
         title=item.title,
@@ -32,10 +44,13 @@ def _item_to_response(item: Item) -> ItemResponse:
         thumbnail_path=item.thumbnail_path,
         confidence=item.confidence,
         item_metadata=item.item_metadata,
+        is_favorite=item.is_favorite,
+        favorite_at=item.favorite_at,
         created_at=item.created_at,
         updated_at=item.updated_at,
         category_name=item.category.name if item.category else None,
         tags=[tag.name for tag in item.tags] if item.tags else [],
+        associated_items=associated,
     )
 
 
@@ -66,7 +81,11 @@ async def search_items(
                 Item.extracted_text.ilike(search_pattern),
             )
         )
-        .options(selectinload(Item.category), selectinload(Item.tags))
+        .options(
+            selectinload(Item.category),
+            selectinload(Item.tags),
+            selectinload(Item.associated_items),
+        )
     )
 
     # Apply filters
@@ -145,7 +164,11 @@ async def get_items_grouped_by_category(
         query = (
             select(Item)
             .where(Item.category_id == category.id)
-            .options(selectinload(Item.category), selectinload(Item.tags))
+            .options(
+                selectinload(Item.category),
+                selectinload(Item.tags),
+                selectinload(Item.associated_items),
+            )
             .order_by(Item.created_at.desc())
             .limit(limit_per_category)
         )
@@ -164,7 +187,11 @@ async def get_items_grouped_by_category(
     uncategorized_query = (
         select(Item)
         .where(Item.category_id.is_(None))
-        .options(selectinload(Item.category), selectinload(Item.tags))
+        .options(
+            selectinload(Item.category),
+            selectinload(Item.tags),
+            selectinload(Item.associated_items),
+        )
         .order_by(Item.created_at.desc())
         .limit(limit_per_category)
     )

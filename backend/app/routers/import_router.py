@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from ..database import get_db
 from ..models import Item
-from ..schemas.item import ItemResponse, ItemImportRequest, ItemImportResponse
+from ..schemas.item import ItemResponse, ItemImportRequest, ItemImportResponse, AssociatedItemBrief
 from ..services import StorageService, FileProcessor, WebScraper, Classifier
 from ..config import get_settings
 
@@ -53,6 +53,18 @@ router = APIRouter()
 
 def _item_to_response(item: Item) -> ItemResponse:
     """Convert Item model to response schema."""
+    # Get associated items (both directions)
+    associated = []
+    if hasattr(item, 'associated_items') and item.associated_items:
+        for assoc in item.associated_items:
+            associated.append(AssociatedItemBrief(
+                id=assoc.id,
+                title=assoc.title,
+                content_type=assoc.content_type,
+                thumbnail_path=assoc.thumbnail_path,
+            ))
+    # Note: associated_by requires separate loading which we skip for simplicity
+
     return ItemResponse(
         id=item.id,
         title=item.title,
@@ -69,10 +81,13 @@ def _item_to_response(item: Item) -> ItemResponse:
         thumbnail_path=item.thumbnail_path,
         confidence=item.confidence,
         item_metadata=item.item_metadata,
+        is_favorite=item.is_favorite,
+        favorite_at=item.favorite_at,
         created_at=item.created_at,
         updated_at=item.updated_at,
         category_name=item.category.name if item.category else None,
         tags=[tag.name for tag in item.tags] if item.tags else [],
+        associated_items=associated,
     )
 
 
@@ -165,7 +180,11 @@ async def import_file(
     query = (
         select(Item)
         .where(Item.id == item.id)
-        .options(selectinload(Item.category), selectinload(Item.tags))
+        .options(
+            selectinload(Item.category),
+            selectinload(Item.tags),
+            selectinload(Item.associated_items),
+        )
     )
     result = await db.execute(query)
     item = result.scalar_one()
@@ -239,7 +258,11 @@ async def import_url(
     query = (
         select(Item)
         .where(Item.id == item.id)
-        .options(selectinload(Item.category), selectinload(Item.tags))
+        .options(
+            selectinload(Item.category),
+            selectinload(Item.tags),
+            selectinload(Item.associated_items),
+        )
     )
     result = await db.execute(query)
     item = result.scalar_one()
@@ -355,7 +378,11 @@ async def import_from_path(
         query = (
             select(Item)
             .where(Item.id == item.id)
-            .options(selectinload(Item.category), selectinload(Item.tags))
+            .options(
+                selectinload(Item.category),
+                selectinload(Item.tags),
+                selectinload(Item.associated_items),
+            )
         )
         result = await db.execute(query)
         loaded_item = result.scalar_one()
@@ -372,11 +399,15 @@ async def import_from_path(
 
 @router.post("/{item_id}/reclassify", response_model=ItemResponse)
 async def reclassify_item(item_id: int, db: AsyncSession = Depends(get_db)):
-    """Re-classify an existing item."""
+    """Re-classify an existing item using AI."""
     query = (
         select(Item)
         .where(Item.id == item_id)
-        .options(selectinload(Item.category), selectinload(Item.tags))
+        .options(
+            selectinload(Item.category),
+            selectinload(Item.tags),
+            selectinload(Item.associated_items),
+        )
     )
     result = await db.execute(query)
     item = result.scalar_one_or_none()
@@ -395,20 +426,38 @@ async def reclassify_item(item_id: int, db: AsyncSession = Depends(get_db)):
 
     text_for_classification = ' '.join(text_parts)
 
-    # Get file path hint if available
-    file_path = Path(item.original_path) if item.original_path else None
-
-    # Classify
-    category_id, confidence = await classifier.classify(
+    # Use AI classification
+    category_id, category_name, confidence = await classifier.classify_with_ai(
         text_for_classification,
-        file_path=file_path,
         session=db,
     )
+
+    # Fallback to rule-based if AI fails
+    if category_id is None:
+        file_path = Path(item.original_path) if item.original_path else None
+        category_id, confidence = await classifier.classify(
+            text_for_classification,
+            file_path=file_path,
+            session=db,
+        )
 
     item.category_id = category_id
     item.confidence = confidence
 
     await db.commit()
     await db.refresh(item)
+
+    # Reload with relationships
+    query = (
+        select(Item)
+        .where(Item.id == item.id)
+        .options(
+            selectinload(Item.category),
+            selectinload(Item.tags),
+            selectinload(Item.associated_items),
+        )
+    )
+    result = await db.execute(query)
+    item = result.scalar_one()
 
     return _item_to_response(item)

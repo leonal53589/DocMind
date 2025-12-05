@@ -13,6 +13,15 @@ export const updateItem = (id, data) => api.put(`/items/${id}`, data)
 export const deleteItem = (id) => api.delete(`/items/${id}`)
 export const getAISummary = (id) => api.post(`/items/${id}/ai-summary`, null, { timeout: 120000 })
 
+// Favorites
+export const toggleFavorite = (id) => api.post(`/items/${id}/favorite`)
+export const getFavorites = (params) => api.get('/items/', { params: { ...params, favorites_only: true } })
+
+// Associations
+export const addAssociation = (id, associatedItemId) => api.post(`/items/${id}/associations`, { associated_item_id: associatedItemId })
+export const removeAssociation = (id, associatedItemId) => api.delete(`/items/${id}/associations/${associatedItemId}`)
+export const getAssociations = (id) => api.get(`/items/${id}/associations`)
+
 // Categories
 export const getCategories = () => api.get('/categories/')
 export const getCategoryTree = () => api.get('/categories/tree')

@@ -1,5 +1,6 @@
 """Items API router."""
 
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,7 +12,8 @@ from sqlalchemy.orm import selectinload
 from ..database import get_db
 from ..models import Item, Category, Tag
 from ..schemas.item import (
-    ItemCreate, ItemUpdate, ItemResponse, ItemListResponse
+    ItemCreate, ItemUpdate, ItemResponse, ItemListResponse,
+    AssociatedItemBrief, ItemAssociationRequest
 )
 from ..config import get_settings
 
@@ -20,6 +22,19 @@ router = APIRouter()
 
 def _item_to_response(item: Item) -> ItemResponse:
     """Convert Item model to response schema."""
+    # Get associated items (both directions)
+    associated = []
+    if hasattr(item, 'associated_items') and item.associated_items:
+        for assoc in item.associated_items:
+            associated.append(AssociatedItemBrief(
+                id=assoc.id,
+                title=assoc.title,
+                content_type=assoc.content_type,
+                thumbnail_path=assoc.thumbnail_path,
+            ))
+    # Note: associated_by requires separate loading which we skip for simplicity
+    # The bidirectional associations are handled through associated_items
+
     return ItemResponse(
         id=item.id,
         title=item.title,
@@ -36,10 +51,13 @@ def _item_to_response(item: Item) -> ItemResponse:
         thumbnail_path=item.thumbnail_path,
         confidence=item.confidence,
         item_metadata=item.item_metadata,
+        is_favorite=item.is_favorite,
+        favorite_at=item.favorite_at,
         created_at=item.created_at,
         updated_at=item.updated_at,
         category_name=item.category.name if item.category else None,
-        tags=[tag.name for tag in item.tags],
+        tags=[tag.name for tag in item.tags] if item.tags else [],
+        associated_items=associated,
     )
 
 
@@ -49,16 +67,23 @@ async def list_items(
     page_size: int = Query(20, ge=1, le=100),
     category_id: Optional[int] = None,
     content_type: Optional[str] = None,
+    favorites_only: bool = False,
     db: AsyncSession = Depends(get_db),
 ):
     """List all items with pagination and filtering."""
-    query = select(Item).options(selectinload(Item.category), selectinload(Item.tags))
+    query = select(Item).options(
+        selectinload(Item.category),
+        selectinload(Item.tags),
+        selectinload(Item.associated_items),
+    )
 
     # Apply filters
     if category_id:
         query = query.where(Item.category_id == category_id)
     if content_type:
         query = query.where(Item.content_type == content_type)
+    if favorites_only:
+        query = query.where(Item.is_favorite == True)
 
     # Count total
     count_query = select(func.count(Item.id))
@@ -66,12 +91,17 @@ async def list_items(
         count_query = count_query.where(Item.category_id == category_id)
     if content_type:
         count_query = count_query.where(Item.content_type == content_type)
+    if favorites_only:
+        count_query = count_query.where(Item.is_favorite == True)
 
     total = await db.scalar(count_query)
 
-    # Apply pagination
+    # Apply pagination - favorites sorted by favorite_at, others by created_at
     offset = (page - 1) * page_size
-    query = query.order_by(Item.created_at.desc()).offset(offset).limit(page_size)
+    if favorites_only:
+        query = query.order_by(Item.favorite_at.desc()).offset(offset).limit(page_size)
+    else:
+        query = query.order_by(Item.created_at.desc()).offset(offset).limit(page_size)
 
     result = await db.execute(query)
     items = result.scalars().all()
@@ -91,7 +121,11 @@ async def get_item(item_id: int, db: AsyncSession = Depends(get_db)):
     query = (
         select(Item)
         .where(Item.id == item_id)
-        .options(selectinload(Item.category), selectinload(Item.tags))
+        .options(
+            selectinload(Item.category),
+            selectinload(Item.tags),
+            selectinload(Item.associated_items),
+        )
     )
     result = await db.execute(query)
     item = result.scalar_one_or_none()
@@ -137,11 +171,15 @@ async def update_item(
     item_data: ItemUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    """Update an item."""
+    """Update an item (supports rename, category change, favorites, etc.)."""
     query = (
         select(Item)
         .where(Item.id == item_id)
-        .options(selectinload(Item.category), selectinload(Item.tags))
+        .options(
+            selectinload(Item.category),
+            selectinload(Item.tags),
+            selectinload(Item.associated_items),
+        )
     )
     result = await db.execute(query)
     item = result.scalar_one_or_none()
@@ -151,6 +189,14 @@ async def update_item(
 
     # Update fields
     update_data = item_data.model_dump(exclude_unset=True)
+
+    # Handle is_favorite specially to set favorite_at timestamp
+    if 'is_favorite' in update_data:
+        if update_data['is_favorite'] and not item.is_favorite:
+            item.favorite_at = datetime.utcnow()
+        elif not update_data['is_favorite']:
+            item.favorite_at = None
+
     for field, value in update_data.items():
         setattr(item, field, value)
 
@@ -415,3 +461,186 @@ async def get_ai_summary(
             status_code=500,
             detail=f"AI分析失败: {str(e)}"
         )
+
+
+# ============ Favorites Endpoints ============
+
+@router.post("/{item_id}/favorite", response_model=ItemResponse)
+async def toggle_favorite(
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Toggle favorite status for an item."""
+    query = (
+        select(Item)
+        .where(Item.id == item_id)
+        .options(
+            selectinload(Item.category),
+            selectinload(Item.tags),
+            selectinload(Item.associated_items),
+        )
+    )
+    result = await db.execute(query)
+    item = result.scalar_one_or_none()
+
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    # Toggle favorite
+    item.is_favorite = not item.is_favorite
+    if item.is_favorite:
+        item.favorite_at = datetime.utcnow()
+    else:
+        item.favorite_at = None
+
+    await db.commit()
+    await db.refresh(item)
+
+    return _item_to_response(item)
+
+
+# ============ Association Endpoints ============
+
+@router.post("/{item_id}/associations", response_model=ItemResponse)
+async def add_association(
+    item_id: int,
+    request: ItemAssociationRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Add an association between two items."""
+    if item_id == request.associated_item_id:
+        raise HTTPException(status_code=400, detail="Cannot associate item with itself")
+
+    # Get source item
+    query = (
+        select(Item)
+        .where(Item.id == item_id)
+        .options(
+            selectinload(Item.category),
+            selectinload(Item.tags),
+            selectinload(Item.associated_items),
+        )
+    )
+    result = await db.execute(query)
+    item = result.scalar_one_or_none()
+
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    # Get target item
+    target_query = select(Item).where(Item.id == request.associated_item_id)
+    target_result = await db.execute(target_query)
+    target_item = target_result.scalar_one_or_none()
+
+    if not target_item:
+        raise HTTPException(status_code=404, detail="Associated item not found")
+
+    # Check if already associated
+    if target_item in item.associated_items:
+        raise HTTPException(status_code=400, detail="Items are already associated")
+
+    # Add association
+    item.associated_items.append(target_item)
+    await db.commit()
+    await db.refresh(item)
+
+    return _item_to_response(item)
+
+
+@router.delete("/{item_id}/associations/{associated_item_id}", response_model=ItemResponse)
+async def remove_association(
+    item_id: int,
+    associated_item_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove an association between two items."""
+    # Get source item
+    query = (
+        select(Item)
+        .where(Item.id == item_id)
+        .options(
+            selectinload(Item.category),
+            selectinload(Item.tags),
+            selectinload(Item.associated_items),
+        )
+    )
+    result = await db.execute(query)
+    item = result.scalar_one_or_none()
+
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    # Find and remove association
+    for assoc in item.associated_items:
+        if assoc.id == associated_item_id:
+            item.associated_items.remove(assoc)
+            await db.commit()
+            await db.refresh(item)
+            return _item_to_response(item)
+
+    # Also check reverse direction
+    reverse_query = (
+        select(Item)
+        .where(Item.id == associated_item_id)
+        .options(selectinload(Item.associated_items))
+    )
+    reverse_result = await db.execute(reverse_query)
+    reverse_item = reverse_result.scalar_one_or_none()
+
+    if reverse_item:
+        for assoc in reverse_item.associated_items:
+            if assoc.id == item_id:
+                reverse_item.associated_items.remove(assoc)
+                await db.commit()
+                await db.refresh(item)
+                return _item_to_response(item)
+
+    raise HTTPException(status_code=404, detail="Association not found")
+
+
+@router.get("/{item_id}/associations", response_model=list[AssociatedItemBrief])
+async def get_associations(
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get all items associated with an item."""
+    query = (
+        select(Item)
+        .where(Item.id == item_id)
+        .options(selectinload(Item.associated_items))
+    )
+    result = await db.execute(query)
+    item = result.scalar_one_or_none()
+
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    # Get associations from both directions
+    associated = []
+    for assoc in item.associated_items:
+        associated.append(AssociatedItemBrief(
+            id=assoc.id,
+            title=assoc.title,
+            content_type=assoc.content_type,
+            thumbnail_path=assoc.thumbnail_path,
+        ))
+
+    # Also get reverse associations
+    reverse_query = (
+        select(Item)
+        .options(selectinload(Item.associated_items))
+        .where(Item.associated_items.any(Item.id == item_id))
+    )
+    reverse_result = await db.execute(reverse_query)
+    reverse_items = reverse_result.scalars().all()
+
+    for rev_item in reverse_items:
+        if rev_item.id not in [a.id for a in associated]:
+            associated.append(AssociatedItemBrief(
+                id=rev_item.id,
+                title=rev_item.title,
+                content_type=rev_item.content_type,
+                thumbnail_path=rev_item.thumbnail_path,
+            ))
+
+    return associated

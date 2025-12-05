@@ -68,14 +68,20 @@ data/
 *.sqlite
 *.sqlite3
 
+# Uploaded/stored files
+files/
+thumbnails/
+
 # Logs
 *.log
 logs/
 
-# Environment variables
+# Environment variables and secrets
 .env
 .env.local
 .env.*.local
+.env.production
+.env.development
 
 # Node.js / Frontend
 node_modules/
@@ -108,6 +114,11 @@ temp/
 credentials.json
 secrets.json
 config.yaml
+config.local.yaml
 
 # Claude Code local settings
 .claude/
+
+# Package lock files (optional - uncomment if you want to exclude)
+# package-lock.json
+# pnpm-lock.yaml

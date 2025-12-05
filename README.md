@@ -5,11 +5,15 @@
 ## 功能特性 / Features
 
 - **多格式支持**: 导入文档（PDF、DOCX、TXT）、图片、视频、代码文件和网页
-- **自动分类**: 基于规则和可选的AI内容分类
+- **自动分类**: 基于规则和可选的AI内容分类（支持DeepSeek API）
 - **全文搜索**: 使用SQLite FTS5进行快速内容搜索
 - **文件去重**: 自动检测和处理重复文件
 - **文本提取**: 从PDF、Word文档等提取和索引文本
 - **缩略图生成**: 自动生成图片缩略图以便可视化浏览
+- **收藏夹**: 快速收藏重要项目，便于快速访问
+- **项目关联**: 建立项目之间的关联关系，可视化网络图展示
+- **重命名支持**: 直接在界面上重命名项目
+- **AI摘要**: 使用AI生成内容摘要和分类推荐
 - **多接口**: Web界面、命令行和REST API
 
 ---
@@ -152,7 +156,11 @@ storage:
 
 classification:
   auto_classify: true
-  use_ai: false
+  ai_provider: "deepseek"   # 可选: "ollama" 或 "deepseek"
+  # DeepSeek设置（推荐）
+  deepseek_url: "https://api.deepseek.com/v1/chat/completions"
+  deepseek_model: "deepseek-chat"
+  # Ollama设置（本地）
   ollama_model: "llama3.2"
   ollama_url: "http://localhost:11434"
 
@@ -161,6 +169,12 @@ import:
   generate_thumbnails: true
   deduplicate: true
 ```
+
+### 环境变量 / Environment Variables
+
+| 变量名 | 描述 | 必需 |
+|--------|------|------|
+| `DEEPSEEK_API_KEY` | DeepSeek API密钥 | 使用DeepSeek时需要 |
 
 ## API文档 / API Documentation
 
@@ -174,8 +188,16 @@ import:
 |------|------|------|
 | GET | `/api/items/` | 分页列出项目 |
 | GET | `/api/items/{id}` | 获取项目详情 |
+| PUT | `/api/items/{id}` | 更新项目（重命名、修改分类等） |
+| DELETE | `/api/items/{id}` | 删除项目 |
+| POST | `/api/items/{id}/favorite` | 切换收藏状态 |
+| POST | `/api/items/{id}/associations` | 添加项目关联 |
+| DELETE | `/api/items/{id}/associations/{aid}` | 删除项目关联 |
+| GET | `/api/items/{id}/associations` | 获取项目关联列表 |
+| POST | `/api/items/{id}/ai-summary` | 获取AI摘要和分类推荐 |
 | POST | `/api/import/file` | 导入文件 |
 | POST | `/api/import/url` | 从URL导入 |
+| POST | `/api/import/{id}/reclassify` | AI重新分类 |
 | GET | `/api/search/` | 全文搜索 |
 | GET | `/api/categories/` | 列出分类 |
 | GET | `/api/stats` | 知识库统计 |

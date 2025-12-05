@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 import json
 
-from sqlalchemy import String, Text, Integer, Float, DateTime, ForeignKey, JSON
+from sqlalchemy import String, Text, Integer, Float, DateTime, ForeignKey, JSON, Boolean, Table, Column
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
@@ -12,6 +12,15 @@ from ..database import Base
 if TYPE_CHECKING:
     from .category import Category
     from .tag import Tag
+
+
+# Junction table for many-to-many relationship between items (associations)
+ItemAssociation = Table(
+    "item_associations",
+    Base.metadata,
+    Column("item_id", Integer, ForeignKey("items.id", ondelete="CASCADE"), primary_key=True),
+    Column("associated_item_id", Integer, ForeignKey("items.id", ondelete="CASCADE"), primary_key=True),
+)
 
 
 class Item(Base):
@@ -44,6 +53,10 @@ class Item(Base):
     )
     confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
+    # Favorites
+    is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    favorite_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     # Flexible metadata as JSON
     item_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
@@ -61,6 +74,15 @@ class Item(Base):
     )
     tags: Mapped[list["Tag"]] = relationship(
         "Tag", secondary="item_tags", back_populates="items"
+    )
+
+    # Self-referential many-to-many for item associations
+    associated_items: Mapped[list["Item"]] = relationship(
+        "Item",
+        secondary=ItemAssociation,
+        primaryjoin=id == ItemAssociation.c.item_id,
+        secondaryjoin=id == ItemAssociation.c.associated_item_id,
+        backref="associated_by",
     )
 
     def __repr__(self) -> str:

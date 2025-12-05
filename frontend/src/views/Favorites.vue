@@ -1,13 +1,11 @@
 <template>
   <div class="space-y-6">
-    <!-- Category Header -->
+    <!-- Header -->
     <div class="flex items-center justify-between">
       <div>
-        <h1 class="text-2xl font-bold text-gray-900">
-          {{ currentCategory ? currentCategory.name : '所有项目' }}
-        </h1>
-        <p v-if="currentCategory?.description" class="text-sm text-gray-500 mt-1">
-          {{ currentCategory.description }}
+        <h1 class="text-2xl font-bold text-gray-900">收藏夹</h1>
+        <p class="text-sm text-gray-500 mt-1">
+          您标记为收藏的项目，按收藏时间排序
         </p>
       </div>
 
@@ -22,29 +20,20 @@
           <option value="url">网页</option>
           <option value="note">笔记</option>
         </select>
-
-        <!-- Sort -->
-        <select
-          v-model="sortBy"
-          class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
-        >
-          <option value="created_at">最新优先</option>
-          <option value="title">标题 A-Z</option>
-        </select>
       </div>
     </div>
 
     <!-- Items Grid -->
     <div v-if="loading" class="text-center py-12">
-      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-      <p class="mt-2 text-gray-500">加载项目中...</p>
+      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-500"></div>
+      <p class="mt-2 text-gray-500">加载收藏中...</p>
     </div>
 
     <div v-else-if="items.length === 0" class="text-center py-12 bg-white rounded-lg shadow">
-      <FolderOpenIcon class="mx-auto h-12 w-12 text-gray-400" />
-      <h3 class="mt-2 text-lg font-medium text-gray-900">未找到项目</h3>
+      <StarIcon class="mx-auto h-12 w-12 text-gray-400" />
+      <h3 class="mt-2 text-lg font-medium text-gray-900">暂无收藏</h3>
       <p class="mt-1 text-sm text-gray-500">
-        {{ currentCategory ? '该分类为空。' : '导入一些内容开始使用吧。' }}
+        点击项目旁边的星号图标将其添加到收藏夹。
       </p>
     </div>
 
@@ -55,7 +44,6 @@
         :item="item"
         :all-items="allItems"
         @delete="handleDelete"
-        @reclassify="handleReclassify"
         @update="handleUpdate"
       />
     </div>
@@ -80,7 +68,7 @@
           :class="[
             'px-3 py-1 border rounded text-sm',
             page === currentPage
-              ? 'bg-blue-600 text-white border-blue-600'
+              ? 'bg-yellow-500 text-white border-yellow-500'
               : 'border-gray-300 hover:bg-gray-50'
           ]"
         >
@@ -100,13 +88,11 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
 import { useMainStore } from '../stores/main'
 import * as api from '../api'
-import { FolderOpenIcon } from '@heroicons/vue/24/outline'
+import { StarIcon } from '@heroicons/vue/24/outline'
 import ItemCard from '../components/ItemCard.vue'
 
-const route = useRoute()
 const store = useMainStore()
 
 const loading = ref(true)
@@ -116,14 +102,6 @@ const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const filterType = ref('')
-const sortBy = ref('created_at')
-
-const categoryId = computed(() => route.params.categoryId)
-
-const currentCategory = computed(() => {
-  if (!categoryId.value) return null
-  return store.categories.find(c => c.id === parseInt(categoryId.value))
-})
 
 const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
 
@@ -137,19 +115,19 @@ const displayPages = computed(() => {
   return pages
 })
 
-async function fetchItems() {
+async function fetchFavorites() {
   loading.value = true
   try {
     const params = {
       page: currentPage.value,
       page_size: pageSize.value,
+      favorites_only: true,
     }
-    if (categoryId.value) params.category_id = categoryId.value
     if (filterType.value) params.content_type = filterType.value
 
-    const data = await store.fetchItems(params)
-    items.value = data?.items || []
-    total.value = data?.total || 0
+    const response = await api.getFavorites(params)
+    items.value = response.data?.items || []
+    total.value = response.data?.total || 0
   } finally {
     loading.value = false
   }
@@ -167,26 +145,31 @@ async function fetchAllItems() {
 async function handleDelete(id) {
   if (confirm('确定要删除这个项目吗？')) {
     await store.deleteItem(id)
-    await fetchItems()
-  }
-}
-
-async function handleReclassify(id) {
-  try {
-    await store.reclassifyItem(id)
-    await fetchItems()
-  } catch (error) {
-    alert('重新分类失败')
+    await fetchFavorites()
   }
 }
 
 async function handleUpdate(id) {
-  // Refresh the updated item
   try {
     const response = await api.getItem(id)
-    const index = items.value.findIndex(item => item.id === id)
-    if (index !== -1) {
-      items.value[index] = response.data
+    const updatedItem = response.data
+
+    // If item is no longer a favorite, remove it from the list
+    if (!updatedItem.is_favorite) {
+      items.value = items.value.filter(item => item.id !== id)
+      total.value = Math.max(0, total.value - 1)
+    } else {
+      // Update the item in place
+      const index = items.value.findIndex(item => item.id === id)
+      if (index !== -1) {
+        items.value[index] = updatedItem
+      }
+    }
+
+    // Also update in allItems
+    const allIndex = allItems.value.findIndex(item => item.id === id)
+    if (allIndex !== -1) {
+      allItems.value[allIndex] = updatedItem
     }
   } catch (error) {
     console.error('Failed to refresh item:', error)
@@ -199,15 +182,14 @@ function goToPage(page) {
   }
 }
 
-watch([categoryId, filterType, sortBy], () => {
+watch([filterType], () => {
   currentPage.value = 1
-  fetchItems()
+  fetchFavorites()
 })
 
-watch(currentPage, fetchItems)
+watch(currentPage, fetchFavorites)
 
 onMounted(async () => {
-  await store.fetchCategories()
-  await Promise.all([fetchItems(), fetchAllItems()])
+  await Promise.all([fetchFavorites(), fetchAllItems()])
 })
 </script>

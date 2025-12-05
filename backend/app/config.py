@@ -2,9 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import Optional
 from functools import lru_cache
-from pydantic import Field  # 用于提供默认值说明
 
 import yaml
 from pydantic import BaseModel
@@ -41,10 +39,7 @@ class ClassificationConfig(BaseModel):
     ollama_model: str = "qwen2.5:7b"
     ollama_url: str = "http://localhost:11434"
     # DeepSeek settings
-    deepseek_api_key: str = Field(
-        default_factory=lambda: os.getenv("KNOWLEDGEVAULT_DEEPSEEK_API_KEY", ""),
-        description="DeepSeek API Key. Read from environment variable 'KNOWLEDGEVAULT_DEEPSEEK_API_KEY'."
-    )
+    deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-chat"
     deepseek_url: str = "https://api.deepseek.com/v1/chat/completions"
     rules: list[ClassificationRule] = []
@@ -97,8 +92,10 @@ class Settings(BaseSettings):
                 self.import_config = ImportConfig(**config_data["import"])
 
         # Override with environment variables
-        if os.getenv("DEEPSEEK_API_KEY"):
-            self.classification.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+        # Support multiple env var names for API key
+        api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("KNOWLEDGEVAULT_DEEPSEEK_API_KEY")
+        if api_key:
+            self.classification.deepseek_api_key = api_key
         if os.getenv("AI_PROVIDER"):
             self.classification.ai_provider = os.getenv("AI_PROVIDER")
 

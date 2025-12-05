@@ -4,6 +4,7 @@ import re
 from typing import Optional
 from pathlib import Path
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -112,6 +113,116 @@ class Classifier:
 
         return None, confidence
 
+    async def classify_with_ai(
+        self,
+        text: str,
+        session: AsyncSession,
+    ) -> tuple[Optional[int], Optional[str], float]:
+        """
+        Classify using AI API (DeepSeek or Ollama).
+
+        Args:
+            text: Text content to classify
+            session: Database session for looking up categories
+
+        Returns:
+            Tuple of (category_id, category_name, confidence)
+        """
+        # Get all categories
+        result = await session.execute(select(Category))
+        categories = result.scalars().all()
+
+        if not categories:
+            return None, None, 0.0
+
+        category_names = [cat.name for cat in categories]
+        category_map = {cat.name: cat.id for cat in categories}
+
+        # Build prompt
+        prompt = f"""请分析以下内容，从给定的分类中选择最合适的一个。
+
+可选分类: {', '.join(category_names)}
+
+内容:
+{text[:3000]}
+
+请只回复分类名称，不要包含任何其他内容。"""
+
+        try:
+            async with httpx.AsyncClient() as client:
+                ai_provider = self.settings.classification.ai_provider.lower()
+
+                if ai_provider == "deepseek":
+                    # Use DeepSeek API
+                    api_key = self.settings.classification.deepseek_api_key
+                    if not api_key:
+                        raise Exception("DeepSeek API密钥未配置")
+
+                    response = await client.post(
+                        self.settings.classification.deepseek_url,
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": self.settings.classification.deepseek_model,
+                            "messages": [
+                                {"role": "user", "content": prompt}
+                            ],
+                            "temperature": 0.3,
+                            "max_tokens": 100,
+                        },
+                        timeout=60.0,
+                    )
+
+                    if response.status_code != 200:
+                        raise Exception(f"DeepSeek API返回 {response.status_code}")
+
+                    result = response.json()
+                    ai_response = result["choices"][0]["message"]["content"].strip()
+
+                else:
+                    # Use Ollama
+                    response = await client.post(
+                        f"{self.settings.classification.ollama_url}/api/generate",
+                        json={
+                            "model": self.settings.classification.ollama_model,
+                            "prompt": prompt,
+                            "stream": False,
+                        },
+                        timeout=60.0,
+                    )
+
+                    if response.status_code != 200:
+                        raise Exception(f"Ollama返回 {response.status_code}")
+
+                    result = response.json()
+                    ai_response = result.get("response", "").strip()
+
+                # Match category name
+                matched_category = None
+                matched_id = None
+
+                # Exact match
+                if ai_response in category_map:
+                    matched_category = ai_response
+                    matched_id = category_map[ai_response]
+                else:
+                    # Fuzzy match
+                    for cat_name in category_names:
+                        if cat_name.lower() in ai_response.lower() or ai_response.lower() in cat_name.lower():
+                            matched_category = cat_name
+                            matched_id = category_map[cat_name]
+                            break
+
+                if matched_id:
+                    return matched_id, matched_category, 0.9
+
+        except Exception as e:
+            print(f"AI classification failed: {e}")
+
+        return None, None, 0.0
+
     def _calculate_rule_score(
         self,
         text: str,
@@ -191,49 +302,3 @@ class Classifier:
             self._category_cache[category_name] = category_id
 
         return category_id
-
-    async def classify_with_ai(
-        self,
-        text: str,
-        categories: list[str],
-    ) -> tuple[Optional[str], float]:
-        """
-        Classify using local LLM via Ollama.
-
-        Falls back to rule-based if AI is unavailable.
-        """
-        if not self.settings.classification.use_ai:
-            return None, 0.0
-
-        try:
-            import httpx
-
-            prompt = f"""Classify the following text into one of these categories: {', '.join(categories)}
-
-Text: {text[:2000]}
-
-Respond with only the category name, nothing else."""
-
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.settings.classification.ollama_url}/api/generate",
-                    json={
-                        "model": self.settings.classification.ollama_model,
-                        "prompt": prompt,
-                        "stream": False,
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code == 200:
-                    result = response.json()
-                    category = result.get("response", "").strip()
-
-                    # Validate category
-                    if category in categories:
-                        return category, 0.85  # High confidence for AI
-
-        except Exception as e:
-            print(f"AI classification failed: {e}")
-
-        return None, 0.0

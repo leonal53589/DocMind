@@ -98,6 +98,7 @@
           v-for="item in recentItems"
           :key="item.id"
           :item="item"
+          :all-items="allItems"
           @delete="handleDelete"
           @update="handleUpdate"
         />
@@ -125,6 +126,7 @@ const store = useMainStore()
 
 const loading = ref(true)
 const recentItems = ref([])
+const allItems = ref([])
 
 const stats = computed(() => store.stats)
 
@@ -161,6 +163,9 @@ onMounted(async () => {
     await store.fetchStats()
     const data = await store.fetchItems({ page_size: 10 })
     recentItems.value = data?.items || []
+    // Fetch all items for association feature
+    const allData = await api.getItems({ page: 1, page_size: 1000 })
+    allItems.value = allData.data?.items || []
   } finally {
     loading.value = false
   }

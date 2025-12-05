@@ -35,6 +35,17 @@
       </router-link>
 
       <router-link
+        to="/favorites"
+        :class="[
+          'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+          isActive('/favorites') ? 'bg-yellow-50 text-yellow-700' : 'text-gray-700 hover:bg-gray-100'
+        ]"
+      >
+        <StarIcon class="w-5 h-5" />
+        收藏夹
+      </router-link>
+
+      <router-link
         to="/search"
         :class="[
           'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
@@ -120,6 +131,7 @@ import {
   AcademicCapIcon,
   BeakerIcon,
   WrenchScrewdriverIcon,
+  StarIcon,
 } from '@heroicons/vue/24/outline'
 
 const route = useRoute()
