@@ -1,0 +1,141 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "knowledgevault"
+version = "0.1.0"
+description = "A local knowledge repository system for managing and organizing files, notes, and web content"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "KnowledgeVault Team" }
+]
+keywords = [
+    "knowledge-management",
+    "document-management",
+    "note-taking",
+    "file-organization",
+    "local-first"
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Desktop Environment :: File Managers",
+    "Topic :: Text Processing :: Indexing",
+]
+
+dependencies = [
+    # Web framework
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+
+    # Database
+    "sqlalchemy[asyncio]>=2.0.25",
+    "aiosqlite>=0.19.0",
+
+    # Configuration
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "pyyaml>=6.0.1",
+
+    # File processing
+    "pillow>=10.2.0",
+    "aiofiles>=23.2.1",
+    "python-multipart>=0.0.6",
+
+    # Web scraping
+    "httpx>=0.26.0",
+    "beautifulsoup4>=4.12.3",
+    "curl-cffi>=0.5.0",
+
+    # CLI
+    "typer>=0.9.0",
+    "rich>=13.7.0",
+
+    # Document text extraction (optional but recommended)
+    "pypdf>=3.17.0",
+    "python-docx>=1.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+    "mypy>=1.8.0",
+    "pre-commit>=3.6.0",
+]
+
+ai = [
+    # For AI-powered classification via Ollama
+    "ollama>=0.1.0",
+]
+
+[project.scripts]
+kvault = "cli.main:main"
+knowledgevault = "cli.main:main"
+
+[project.urls]
+Homepage = "https://github.com/knowledgevault/knowledgevault"
+Documentation = "https://github.com/knowledgevault/knowledgevault#readme"
+Repository = "https://github.com/knowledgevault/knowledgevault"
+Issues = "https://github.com/knowledgevault/knowledgevault/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend", "cli"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # do not perform function calls in argument defaults
+]
+
+[tool.ruff.isort]
+known-first-party = ["backend", "cli"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["backend", "cli"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]

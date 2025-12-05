@@ -1,0 +1,45 @@
+# KnowledgeVault Configuration
+# Copy this file to config.yaml and customize as needed
+
+server:
+  host: "127.0.0.1"
+  port: 8000
+
+storage:
+  data_dir: "./data"
+  max_file_size: 104857600  # 100MB
+
+classification:
+  auto_classify: true
+  use_ai: true
+
+  # AI Provider: "deepseek" or "ollama"
+  ai_provider: "deepseek"
+
+  # DeepSeek Settings (cloud API)
+  # Get API key from: https://platform.deepseek.com/
+  deepseek_api_key: ""  # Or set via DEEPSEEK_API_KEY environment variable
+  deepseek_model: "deepseek-chat"
+  deepseek_url: "https://api.deepseek.com/v1/chat/completions"
+
+  # Ollama Settings (local)
+  # Start Ollama: ollama serve
+  # Pull model: ollama pull qwen2.5:7b
+  ollama_model: "qwen2.5:7b"
+  ollama_url: "http://localhost:11434"
+
+  # Classification rules (keyword-based fallback)
+  rules:
+    - category: "编程"
+      keywords: ["python", "javascript", "code", "programming", "代码", "编程"]
+      file_types: [".py", ".js", ".ts", ".java", ".cpp"]
+    - category: "数学"
+      keywords: ["math", "数学", "equation", "公式", "theorem"]
+    - category: "文档"
+      keywords: ["document", "文档", "report", "报告"]
+      file_types: [".pdf", ".doc", ".docx"]
+
+import:
+  extract_text: true
+  generate_thumbnails: true
+  deduplicate: true
