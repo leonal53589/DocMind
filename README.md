@@ -5,6 +5,8 @@
 ## 功能特性 / Features
 
 - **多格式支持**: 导入文档（PDF、DOCX、TXT）、图片、视频、代码文件和网页
+- **Markdown渲染**: 内置Markdown查看器，支持语法高亮、目录导航、深色模式和字体大小调整
+- **文件预览**: 支持多种文件类型的内置预览（Markdown、图片、PDF、视频、音频、代码）
 - **自动分类**: 基于规则和可选的AI内容分类（支持DeepSeek API）
 - **全文搜索**: 使用SQLite FTS5进行快速内容搜索
 - **文件去重**: 自动检测和处理重复文件
@@ -49,6 +51,15 @@
    npm install
    cd ..
    ```
+
+   主要前端依赖 / Key Frontend Dependencies:
+   - Vue 3 + Vite
+   - Tailwind CSS
+   - Pinia (状态管理)
+   - Vue Router
+   - marked (Markdown解析)
+   - highlight.js (代码语法高亮)
+   - @heroicons/vue (图标库)
 
 ### 导入 deepseek 的 API 密钥 / Import deepseek API key (optional)
 如果你希望使用 deepseek 的 AI 分类功能，请在环境变量中设置 API 密钥：
@@ -127,6 +138,12 @@ knowledgevault/
 │   └── src/
 │       ├── api/           # API客户端
 │       ├── components/    # Vue组件
+│       │   ├── FilePreviewModal.vue  # 通用文件预览模态框
+│       │   ├── MarkdownViewer.vue    # Markdown渲染组件
+│       │   ├── ItemCard.vue          # 项目卡片组件
+│       │   ├── ImportModal.vue       # 导入模态框
+│       │   ├── SearchBar.vue         # 搜索栏组件
+│       │   └── Sidebar.vue           # 侧边栏导航
 │       ├── stores/        # Pinia状态管理
 │       ├── views/         # 页面组件
 │       └── router/        # Vue Router配置
@@ -224,6 +241,32 @@ import:
 | 视频 | MP4, WEBM, MKV, AVI, MOV, WMV |
 | 代码 | Python, JavaScript, TypeScript, Java, C/C++, Go, Rust, Ruby, PHP等 |
 | 数据 | JSON, YAML, XML, TOML, INI, SQL, CSV |
+
+## 文件预览功能 / File Preview Features
+
+知识库支持多种文件类型的内置预览功能：
+
+### Markdown查看器 / Markdown Viewer
+- **语法高亮**: 使用highlight.js进行代码块语法高亮
+- **目录导航**: 自动生成目录（TOC），支持点击跳转
+- **深色模式**: 一键切换深色/浅色主题
+- **字体调整**: 支持调整字体大小（12px-24px）
+- **GFM支持**: 完整支持GitHub Flavored Markdown
+
+### 预览支持的文件类型 / Previewable File Types
+| 类型 | 描述 |
+|------|------|
+| Markdown | 渲染预览，支持语法高亮和目录 |
+| 图片 | 内置图片查看器 |
+| PDF | 使用浏览器内置PDF查看器 |
+| 视频 | HTML5视频播放器 |
+| 音频 | HTML5音频播放器 |
+| 代码 | 语法高亮的代码查看器 |
+| 文本 | 纯文本预览 |
+
+### 快捷键 / Keyboard Shortcuts
+- `Esc`: 关闭预览窗口
+- `Ctrl/Cmd + F`: 切换全屏模式
 
 ## 命令行命令 / CLI Commands
 

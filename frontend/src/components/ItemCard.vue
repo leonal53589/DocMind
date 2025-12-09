@@ -1,10 +1,8 @@
 <template>
-  <div class="px-6 py-4 hover:bg-gray-50 transition-colors">
+  <div class="item-card px-6 py-4 hover:bg-gray-50 transition-colors">
     <div class="flex items-start gap-4">
       <!-- Thumbnail or Icon - Clickable -->
-      <a
-        :href="getItemLink()"
-        :target="item.content_type === 'note' ? '_self' : '_blank'"
+      <button
         class="flex-shrink-0 cursor-pointer"
         @click="handleItemClick($event)"
       >
@@ -12,18 +10,18 @@
           v-if="item.thumbnail_path"
           :src="`/thumbnails/${item.thumbnail_path}`"
           :alt="item.title"
-          class="w-16 h-16 object-cover rounded-lg hover:opacity-80 transition-opacity"
+          class="w-16 h-16 object-cover rounded-lg"
         />
         <div
           v-else
           :class="[
-            'w-16 h-16 rounded-lg flex items-center justify-center hover:opacity-80 transition-opacity',
+            'w-16 h-16 rounded-lg flex items-center justify-center',
             typeColors[item.content_type] || 'bg-gray-100'
           ]"
         >
           <component :is="typeIcons[item.content_type]" class="w-8 h-8 text-white" />
         </div>
-      </a>
+      </button>
 
       <!-- Content -->
       <div class="flex-1 min-w-0">
@@ -31,15 +29,13 @@
           <div class="min-w-0 flex-1">
             <!-- Title - Clickable or Editable -->
             <div class="flex items-center gap-2">
-              <a
+              <button
                 v-if="!isEditingTitle"
-                :href="getItemLink()"
-                :target="item.content_type === 'note' ? '_self' : '_blank'"
-                class="text-sm font-medium text-gray-900 hover:text-blue-600 truncate block cursor-pointer"
+                class="text-sm font-medium text-gray-900 hover:text-blue-600 truncate block cursor-pointer text-left"
                 @click="handleItemClick($event)"
               >
                 {{ item.title }}
-              </a>
+              </button>
               <input
                 v-else
                 v-model="editTitle"
@@ -94,6 +90,14 @@
                 v-if="showMenu"
                 class="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10"
               >
+                <button
+                  v-if="canPreview()"
+                  @click="showPreviewModal = true; showMenu = false"
+                  class="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  <EyeIcon class="w-4 h-4" />
+                  预览
+                </button>
                 <button
                   @click="startEditTitle"
                   class="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
@@ -254,6 +258,20 @@
         </div>
       </div>
     </div>
+
+    <!-- File Preview Modal -->
+    <FilePreviewModal
+      :isOpen="showPreviewModal"
+      :item="item"
+      @close="showPreviewModal = false"
+    />
+
+    <!-- Associated Item Preview Modal -->
+    <FilePreviewModal
+      :isOpen="showAssociatedPreviewModal"
+      :item="selectedAssociatedItem"
+      @close="showAssociatedPreviewModal = false; selectedAssociatedItem = null"
+    />
 
     <!-- Category Editor Modal -->
     <div v-if="showCategoryEditor" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" @click.self="showCategoryEditor = false">
@@ -455,6 +473,7 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useMainStore } from '../stores/main'
 import * as api from '../api'
+import FilePreviewModal from './FilePreviewModal.vue'
 import {
   DocumentTextIcon,
   LinkIcon,
@@ -470,6 +489,7 @@ import {
   PencilIcon,
   ExclamationCircleIcon,
   StarIcon as StarIconOutline,
+  EyeIcon,
 } from '@heroicons/vue/24/outline'
 import { StarIcon as StarIconSolid } from '@heroicons/vue/24/solid'
 
@@ -495,6 +515,9 @@ const store = useMainStore()
 const showMenu = ref(false)
 const showCategoryEditor = ref(false)
 const showAssociationEditor = ref(false)
+const showPreviewModal = ref(false)
+const showAssociatedPreviewModal = ref(false)
+const selectedAssociatedItem = ref(null)
 const selectedCategoryId = ref(props.item.category_id)
 const savingCategory = ref(false)
 const aiLoading = ref(false)
@@ -599,16 +622,18 @@ function getNodeFillColor(contentType) {
   return colors[contentType] || '#6B7280' // gray-500
 }
 
-function navigateToItem(assoc) {
-  // Close modal and emit event to update/navigate
+async function navigateToItem(assoc) {
+  // Close association editor
   showAssociationEditor.value = false
-  if (assoc.content_type === 'file' && assoc.file_path) {
-    window.open(`/files/${assoc.file_path}`, '_blank')
-  } else if (assoc.content_type === 'url' && assoc.url) {
-    window.open(assoc.url, '_blank')
-  } else {
-    // For notes or items without direct links, just alert the title
-    alert(`关联项目: ${assoc.title}`)
+
+  // Fetch full item data before showing preview
+  try {
+    const response = await api.getItem(assoc.id)
+    selectedAssociatedItem.value = response.data
+    showAssociatedPreviewModal.value = true
+  } catch (error) {
+    console.error('Failed to fetch item details:', error)
+    alert('无法加载项目详情')
   }
 }
 
@@ -622,9 +647,44 @@ function getItemLink() {
   return '#'
 }
 
+// Check if file can be previewed in modal
+function canPreview() {
+  if (props.item.content_type !== 'file' || !props.item.file_path) return false
+  const path = props.item.file_path.toLowerCase()
+  const previewableExtensions = [
+    '.md', '.markdown', '.txt', '.json', '.xml', '.yaml', '.yml', '.toml', '.ini',
+    '.js', '.ts', '.jsx', '.tsx', '.vue', '.py', '.java', '.c', '.cpp', '.h', '.hpp',
+    '.cs', '.go', '.rs', '.rb', '.php', '.swift', '.kt', '.scala', '.sh', '.bash',
+    '.zsh', '.ps1', '.sql', '.css', '.scss', '.less', '.html', '.htm',
+    '.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp',
+    '.pdf', '.mp4', '.webm', '.ogg', '.mp3', '.wav', '.flac'
+  ]
+  return previewableExtensions.some(ext => path.endsWith(ext))
+}
+
 function handleItemClick(event) {
+  event.preventDefault()
+
+  // For files that can be previewed, show the preview modal
+  if (canPreview()) {
+    showPreviewModal.value = true
+    return
+  }
+
+  // For other files, open in new tab
+  if (props.item.content_type === 'file' && props.item.file_path) {
+    window.open(`/files/${props.item.file_path}`, '_blank')
+    return
+  }
+
+  // For URLs, open in new tab
+  if (props.item.content_type === 'url' && props.item.url) {
+    window.open(props.item.url, '_blank')
+    return
+  }
+
+  // For notes, show the content
   if (props.item.content_type === 'note') {
-    event.preventDefault()
     if (props.item.extracted_text) {
       alert(props.item.extracted_text.substring(0, 500) + (props.item.extracted_text.length > 500 ? '...' : ''))
     }
